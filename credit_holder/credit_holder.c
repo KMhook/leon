@@ -24,6 +24,7 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <string.h>
+#include <utils.h>
 
 char CD_keyPath[] = "/etc/tcel_leon/credit_holder/keys/";
 char CD_certPath[] = "/etc/tcel_leon/cert/";
@@ -67,22 +68,53 @@ CD_RESULT CD_getSLKey(int security_level, char *buffer, size_t *len) {
     return CD_getKey(keyDesc, buffer, len);
 }
 
-/*
-CD_RESULT CD_createKey(char *desc) {
-    if (create_tpm_context() != UTPM_SUCCESS)
+CD_RESULT CD_createKey(char *filename, void *payload, size_t len) {
+    CD_RESULT res;
+    /* create ukey context */
+    if (utpm_create_context() != UTPM_SUCCESS)
         return CD_CREATE_CONTEXT_FAILED;
+    /* read credit_holder root key */
+    UTPM_KEY rootKey;
+    res = CD_readRootKey(&rootKey);
+    if (res != CD_SUCCESS)
+        return res;
+    /* bind payload */
+    BYTE buffer[CD_KEY_LEN_MAX];
+    UINT32 encLen;
+    if (utpm_bind_data(&rootKey.pubKey, len, payload, &encLen, buffer)
+            != UTPM_SUCCESS)
+        return CD_BIND_KEYS_FAILED;
+    /* write into file */
+    FILE *fp = fopen(filename, "wb");
+    if (fp == NULL)
+        return CD_WRITE_KEY_FAILED;
+    fwrite(buffer, sizeof(BYTE), encLen, fp);
+    fclose(fp);
+    /* free UTPM_KEY */
+    /* FIXME */
+    /* close ukey context */
+    /* FIXME */
 
-    UTPM_KEY wrappedKey;
-    UTPM_KEY_USAGE keyUsage = TPM_KEY_BIND;
-    UTPM_SECRET keyAuth = {0x04, 0x05, 0x06};
-    UTPM_KEY_HANDLE parentHandle = TPM_KH_SRK;
-    UTPM_SECRET parentAuth = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+    return CD_SUCCESS;
+}
 
-    if (create_wrap_key(parentHandle, parentAuth, keyUsage, 
-                keyAuth, &wrappedKey) != UTPM_SUCCESS)
-        return CD_CREATE_KEY_FAILED;
+CD_RESULT CD_createUserKey(char *username, void *payload, size_t len) {
+    char filename[PATH_MAX];
+    sprintf(filename, "%suser/%s", CD_keyPath, username);
+    return CD_createKey(filename, payload, len);
+}
 
-}  */
+CD_RESULT CD_createRoleKey(char *role, void *payload, size_t len) {
+    char filename[PATH_MAX];
+    sprintf(filename, "%srole/%s", CD_keyPath, role);
+    return CD_createKey(filename, payload, len);
+}
+
+CD_RESULT CD_createSLKey(int security_level, void *payload, size_t len) {
+    char filename[PATH_MAX];
+    sprintf(filename, "%ssecurity_level/%d", CD_keyPath, security_level);
+    return CD_createKey(filename, payload, len);
+}
 
 CD_RESULT CD_loadKeys() {
     CD_RESULT res;
@@ -91,9 +123,9 @@ CD_RESULT CD_loadKeys() {
 
     /* 1. read cert */
     CD_cert cert;
-    char fileName[PATH_MAX];
-    sprintf(fileName, "%s%s.cert", CD_certPath, userInfo->pw_name);
-    res = CD_readCert(&cert, fileName);
+    char filename[PATH_MAX];
+    sprintf(filename, "%s%s.cert", CD_certPath, userInfo->pw_name);
+    res = CD_readCert(&cert, filename);
     if (res != CD_SUCCESS)
         return res;
 
@@ -129,8 +161,8 @@ CD_RESULT CD_loadKeys() {
 }
 
 CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
-    UTPM_RESULT res;
-    UTPM_SECRET auth = {0x01, 0x02};
+    CD_RESULT res;
+    UTPM_SECRET auth = CD_ROOTKEY_AUTH;
     char filename[PATH_MAX];
     BYTE inBuffer[CD_KEY_LEN_MAX], outBuffer[CD_KEY_LEN_MAX];
     size_t inLen, outLen;
@@ -138,10 +170,13 @@ CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
     memset(filename, 0, sizeof(filename));
     sprintf(filename, "%suser/%s", CD_keyPath, cert->username);
     FILE *fp = fopen(filename, "rb");
+    if (fp == NULL)
+        return CD_KEYFILE_NOT_FOUND;
     inLen = fread(inBuffer, sizeof(BYTE), CD_KEY_LEN_MAX, fp);
     fclose(fp);
-    res = utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer);
-    if (res != UTPM_SUCCESS)
+
+    if (utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer)
+            != UTPM_SUCCESS)
         return CD_UNBIND_KEYS_FAILED;
 
     res = CD_insertUserKey(cert->username, outBuffer, outLen);
@@ -154,8 +189,8 @@ CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
     fp = fopen(filename, "rb");
     inLen = fread(inBuffer, sizeof(BYTE), CD_KEY_LEN_MAX, fp);
     fclose(fp);
-    res = utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer);
-    if (res != UTPM_SUCCESS)
+    if (utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer)
+            != UTPM_SUCCESS)
         return CD_UNBIND_KEYS_FAILED;
 
     res = CD_insertRoleKey(cert->role, outBuffer, outLen);
@@ -168,8 +203,8 @@ CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
     fp = fopen(filename, "rb");
     inLen = fread(inBuffer, sizeof(BYTE), CD_KEY_LEN_MAX, fp);
     fclose(fp);
-    res = utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer);
-    if (res != UTPM_SUCCESS)
+    if (utpm_unbind_data(*handle, auth, inLen, inBuffer, &outLen, outBuffer)
+            != UTPM_SUCCESS)
         return CD_UNBIND_KEYS_FAILED;
 
     res = CD_insertSLKey(cert->security_level, outBuffer, outLen);
@@ -204,10 +239,8 @@ CD_RESULT CD_insertSLKey(int security_level, void *buf, size_t len) {
     return CD_insertKey(desc, buf, len);
 }
 
-CD_RESULT CD_loadRootKey(UTPM_KEY_HANDLE *rootKeyHandle) {
-    UTPM_RESULT res;
-    UTPM_KEY rootKey;
-    /* 3.1.1 read data from file */
+CD_RESULT CD_readRootKey(UTPM_KEY *rootKey) {
+    CD_RESULT res;
     BYTE *buffer = (BYTE *)malloc(CD_KEY_LEN_MAX);
     BYTE *tail = buffer;
     size_t bufLen = CD_KEY_LEN_MAX;
@@ -215,21 +248,33 @@ CD_RESULT CD_loadRootKey(UTPM_KEY_HANDLE *rootKeyHandle) {
     if (fp == NULL)
         return CD_KEYFILE_NOT_FOUND;
     fread(buffer, sizeof(BYTE), CD_KEY_LEN_MAX, fp);
-    res = tpm_unmarshal_TPM_KEY(&tail, &bufLen, &rootKey);
-    if (res != UTPM_SUCCESS)
+    if (tpm_unmarshal_TPM_KEY(&tail, &bufLen, rootKey)
+            != UTPM_SUCCESS)
         return CD_UNMARSHAL_FAILED;
     free(buffer);
     fclose(fp);
+    return CD_SUCCESS;
+}
+
+CD_RESULT CD_loadRootKey(UTPM_KEY_HANDLE *rootKeyHandle) {
+    CD_RESULT res;
+    UTPM_KEY rootKey;
+    /* 1 read data from file */
+    res = CD_readRootKey(&rootKey);
+    if (res != CD_SUCCESS)
+        return res;
     
-    /* 3.1.2 load key into ukey */
-    res = flush_all();
-    if (res != UTPM_SUCCESS)
+    /* 2 load key into ukey */
+    if (utpm_flush_all() != UTPM_SUCCESS)
         return CD_LOAD_KEY_FAILED;
     UTPM_KEY_HANDLE parentHandle = UTPM_KH_SRK;
-    UTPM_SECRET parentAuth = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-    res = load_key(parentHandle, parentAuth, &rootKey, rootKeyHandle);
-    if (res != UTPM_SUCCESS)
+    UTPM_SECRET parentAuth = CD_SRK_AUTH;
+    if (utpm_load_key(parentHandle, parentAuth, &rootKey, rootKeyHandle)
+            != UTPM_SUCCESS)
         return CD_LOAD_KEY_FAILED;
+
+    /* 3 free TPM_KEY */
+    /* FIXME */
 
     return CD_SUCCESS;
 }
@@ -242,11 +287,12 @@ CD_RESULT CD_readCert(CD_cert *cert, char *path) {
     char *buf = NULL;
     size_t bufLen;
     ssize_t lineLen = getline(&buf, &bufLen, fp);
-    if (strncmp(buf, "name:", 5) == 0) {
+    if (strncmp(buf, "user:", 5) == 0) {
         cert->username = (char *)malloc(lineLen - 5);
         memset(cert->username, 0, lineLen - 5);
         strncpy(cert->username, buf + 5, lineLen - 5 - 1);
     }
+    else return CD_CERT_NOT_VALID;
     free(buf);
     
     buf = NULL;
@@ -256,6 +302,7 @@ CD_RESULT CD_readCert(CD_cert *cert, char *path) {
         memset(cert->role, 0, lineLen - 5);
         strncpy(cert->role, buf + 5, lineLen - 5 - 1);
     }
+    else return CD_CERT_NOT_VALID;
     free(buf);
 
     buf = NULL;
@@ -263,6 +310,7 @@ CD_RESULT CD_readCert(CD_cert *cert, char *path) {
     if (strncmp(buf, "security_level:", 15) == 0) {
         cert->security_level = atoi(buf + 15);
     }
+    else return CD_CERT_NOT_VALID;
     free(buf);
     
     buf = NULL;
@@ -270,8 +318,9 @@ CD_RESULT CD_readCert(CD_cert *cert, char *path) {
     if (strncmp(buf, "signature:", 10) == 0) {
         cert->signature = (BYTE *)malloc(lineLen - 10);
         memset(cert->signature, 0, lineLen - 10);
-        memncpy(cert->signature, buf + 10, buf - 10 - 1);
+        memcpy(cert->signature, buf + 10, lineLen - 10 - 1);
     }
+    else return CD_CERT_NOT_VALID;
     free(buf);
 
     return CD_SUCCESS;
