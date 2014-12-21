@@ -1,12 +1,12 @@
 /*
  * =====================================================================================
  *
- *       Filename:  test.c
+ *       Filename:  cdcreateuserkey.c
  *
  *    Description:  
  *
  *        Version:  1.0
- *        Created:  2014年12月21日 14时12分27秒
+ *        Created:  2014年12月21日 18时41分50秒
  *       Revision:  none
  *       Compiler:  gcc
  *
@@ -16,12 +16,19 @@
  * =====================================================================================
  */
 #include <stdlib.h>
-#include <credit_holder.h>
 #include <stdio.h>
+#include <credit_holder.h>
+#include <string.h>
 
-int main() {
+int main(int argc, char **argv) {
+    if (argc != 3) {
+        printf ( "Wrong arguments.\n" );
+        return -1;
+    }
+
     CD_RESULT res;
-    res = CD_loadKeys();
-    printf("%d\n", res);
+    res = CD_createUserKey(argv[1], argv[2], strlen(argv[2]));
+    if (res == CD_SUCCESS)
+        printf("create complete.\n");
     return res;
 }

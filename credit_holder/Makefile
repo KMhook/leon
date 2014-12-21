@@ -11,8 +11,11 @@ lib: credit_holder.o
 	$(CC) -shared -o libcd.so credit_holder.o
 	ar -r libcd.a credit_holder.o
 
-install: lib
-	ln -s libcd.so /usr/local/lib/libcd.so
+install:
+	ln -s /home/guoang/leon/credit_holder/libcd.so /usr/local/lib/libcd.so
+
+uninstall:
+	rm -rf /usr/local/lib/libcd.so
 
 clean:
 	rm -rf ./*.so ./*.a ./*.o

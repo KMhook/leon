@@ -69,6 +69,12 @@ CD_RESULT CD_getSLKey(int security_level, char *buffer, size_t *len) {
 }
 
 CD_RESULT CD_createKey(char *filename, void *payload, size_t len) {
+    if (getuid() != 0) {
+        printf("You must be root.\n");
+        return CD_CREATE_KEY_FAILED;
+    }
+
+    printf("creating keys...\n");
     CD_RESULT res;
     /* create ukey context */
     if (utpm_create_context() != UTPM_SUCCESS)
@@ -95,6 +101,7 @@ CD_RESULT CD_createKey(char *filename, void *payload, size_t len) {
     /* close ukey context */
     /* FIXME */
 
+    printf("complete\n");
     return CD_SUCCESS;
 }
 
@@ -117,6 +124,7 @@ CD_RESULT CD_createSLKey(int security_level, void *payload, size_t len) {
 }
 
 CD_RESULT CD_loadKeys() {
+    printf("start loading keys...\n");
     CD_RESULT res;
     struct passwd *userInfo;
     userInfo = getpwuid(getuid());
@@ -158,9 +166,13 @@ CD_RESULT CD_loadKeys() {
     res = CD_freeCert(&cert);
     if (res != CD_SUCCESS)
         return res;
+
+    printf("complete\n");
+    return CD_SUCCESS;
 }
 
 CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
+    printf("unbind and insert keys...\n");
     CD_RESULT res;
     UTPM_SECRET auth = CD_ROOTKEY_AUTH;
     char filename[PATH_MAX];
@@ -212,6 +224,7 @@ CD_RESULT CD_unbindAndInsertKeys(UTPM_KEY_HANDLE *handle, CD_cert *cert) {
         return res;
 
     /* success */
+    printf("complete\n");
     return CD_SUCCESS;
 }
 
@@ -240,6 +253,7 @@ CD_RESULT CD_insertSLKey(int security_level, void *buf, size_t len) {
 }
 
 CD_RESULT CD_readRootKey(UTPM_KEY *rootKey) {
+    printf("reading root key...\n");
     CD_RESULT res;
     BYTE *buffer = (BYTE *)malloc(CD_KEY_LEN_MAX);
     BYTE *tail = buffer;
@@ -253,10 +267,12 @@ CD_RESULT CD_readRootKey(UTPM_KEY *rootKey) {
         return CD_UNMARSHAL_FAILED;
     free(buffer);
     fclose(fp);
+    printf("complete\n");
     return CD_SUCCESS;
 }
 
 CD_RESULT CD_loadRootKey(UTPM_KEY_HANDLE *rootKeyHandle) {
+    printf("loading root key...\n");
     CD_RESULT res;
     UTPM_KEY rootKey;
     /* 1 read data from file */
@@ -276,10 +292,13 @@ CD_RESULT CD_loadRootKey(UTPM_KEY_HANDLE *rootKeyHandle) {
     /* 3 free TPM_KEY */
     /* FIXME */
 
+    printf("complete.\n");
     return CD_SUCCESS;
 }
 
 CD_RESULT CD_readCert(CD_cert *cert, char *path) {
+    printf("Reading cert...\n");
+
     FILE *fp = fopen(path, "r");
     if (fp == NULL)
         return CD_CERTFILE_NOT_FOUND;
@@ -323,20 +342,23 @@ CD_RESULT CD_readCert(CD_cert *cert, char *path) {
     else return CD_CERT_NOT_VALID;
     free(buf);
 
+    printf("complete.\n");
     return CD_SUCCESS;
 }
 
-
 CD_RESULT CD_verifyCert(CD_cert *cert) {
+    printf("Verifying cert...\n");
+    printf("complete.\n");
     return CD_SUCCESS;
 }
 
 CD_RESULT CD_freeCert(CD_cert *cert) {
+    printf("Freeing cert...\n");
     if (cert == NULL)
         return CD_CERT_NOT_VALID;
     free(cert->username);
     free(cert->role);
     free(cert->signature);
+    printf("complete.\n");
     return CD_SUCCESS;
 }
-
